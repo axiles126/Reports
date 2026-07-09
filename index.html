@@ -996,6 +996,9 @@ Object.defineProperty(exports, '__esModule', { value: true });
   .c3freqp button { background:transparent; border:1px solid #2c3238; color:#9aa3a8; font:inherit; font-size:11px; padding:3px 6px; cursor:pointer; }
   #c3back { font-size:14px; font-weight:700; color:#e8ecef; }
   #c3cov { font-size:12px; font-weight:600; color:#7fd6e0; }
+  #c3wx { font-size:12px; font-weight:600; color:#cbd3d8; }
+  #c3storm { font-size:12px; font-weight:800; color:#ffd05a; }
+  #c3storm[hidden] { display:none; }
   .c3row { display:flex; gap:10px; margin-top:2px; }
   .c3row button { flex:1; background:transparent; border:1px solid #2c3238; color:#dfe3e6;
                   padding:11px; font:inherit; font-size:12px; cursor:pointer; border-radius:0; }
@@ -1224,6 +1227,8 @@ Object.defineProperty(exports, '__esModule', { value: true });
     <div class="c3topL">
       <div id="c3back">Зворотній азимут: —</div>
       <div id="c3cov">Коридор висот: —</div>
+      <div id="c3wx">Погода: —</div>
+      <div id="c3storm" hidden>⚡ ГРОЗА — польоти небезпечні</div>
       <span id="c3legend">Північ — зелена вісь · промінь — біла лінія</span>
     </div>
     <div class="c3topR">
@@ -1236,6 +1241,9 @@ Object.defineProperty(exports, '__esModule', { value: true });
       <label class="c3cb"><input type="checkbox" id="cbCone" checked> Конус</label>
       <label class="c3cb"><input type="checkbox" id="cbBand" checked> Коридор висот</label>
       <label class="c3cb"><input type="checkbox" id="cbQual"> Якість сигналу (рельєф)</label>
+      <label class="c3cb"><input type="checkbox" id="cbWind"> Вітер (прогноз)</label>
+      <label class="c3cb"><input type="checkbox" id="cbPrecip"> Опади</label>
+      <label class="c3cb"><input type="checkbox" id="cbStorm"> Гроза та блискавки</label>
       <label class="c3cb"><input type="checkbox" id="cbGrid" checked> Сітка</label>
       <label class="c3cb"><input type="checkbox" id="cbSky" checked> Зорі та сузір'я</label>
       <label class="c3cb"><input type="checkbox" id="cbMil"> Азимут у тисячних (0–6000)</label>
@@ -1247,6 +1255,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
       <div class="c3prow"><span class="c3lbl">Вис. ант.</span><input type="number" id="c3anthnum" class="c3num" min="0" max="120" step="1" value="2"><span class="c3u">м</span><input type="range" id="c3anth" min="0" max="120" step="1" value="2"></div>
       <div class="c3prow"><span class="c3lbl">Частота</span><input type="number" id="c3freqnum" class="c3num" min="100" max="60000" step="10" placeholder="МГц"><span class="c3u">МГц</span><div class="c3freqp"><button data-f="915">915</button><button data-f="2400">2400</button><button data-f="5800">5800</button></div></div>
       <div class="c3prow"><span class="c3lbl">Дальність</span><input type="number" id="c3rangenum" class="c3num" min="20" max="15000" step="10" value="120"><span class="c3u">м</span><input type="range" id="c3range" min="20" max="15000" step="50" value="120"></div>
+      <div class="c3prow"><span class="c3lbl">Прогноз</span><span id="c3fhv" class="c3u">зараз</span><input type="range" id="c3fh" min="0" max="47" step="1" value="0"></div>
     </div>
     <div class="c3row">
       <button id="c3reset">Скинути вид</button>
@@ -2518,6 +2527,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
   let three3Ready=null;
   function loadThree3(){ return three3Ready || (three3Ready = window.THREE?Promise.resolve():loadScript3('https://unpkg.com/three@0.128.0/build/three.min.js')); }
   const state3 = { az:0, beam:60, elev:0, range:120, antH:2, yaw:0.7, pitch:0.9, dist:18,
+                   showWind:false, showPrecip:false, showStorm:false, fhour:0,
                    showCone:true, showBand:true, showGrid:true, showSky:true, showQual:false, azMil:false };
   let t3 = null;
   const L3 = 9;
@@ -2648,6 +2658,8 @@ Object.defineProperty(exports, '__esModule', { value: true });
     return new THREE.Vector3(Math.sin(yaw)*Math.cos(pitch)*dist, Math.sin(pitch)*dist, Math.cos(yaw)*Math.cos(pitch)*dist).add(t3.target); }
   function resize3(){ if(!t3) return; const w=innerWidth,h=innerHeight; t3.renderer.setSize(w,h,false); t3.camera.aspect=w/h; t3.camera.updateProjectionMatrix(); }
   function animate3(){ if(!t3) return;
+    const now = performance.now(); const dt = Math.min(0.05, (now - (t3.last || now)) / 1000); t3.last = now;
+    stepWx3(dt); stepStorm3(dt);
     t3.camera.position.copy(camPos3()); t3.camera.lookAt(t3.target);
     t3.renderer.render(t3.scene, t3.camera); t3.raf = requestAnimationFrame(animate3); }
   function setupControls3(el){
@@ -2746,8 +2758,11 @@ Object.defineProperty(exports, '__esModule', { value: true });
       grp.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([visEnd, fullEnd]), new THREE.LineBasicMaterial({color:0xc0392b, transparent:true, opacity:0.6}))); }
     if(state3.showQual){
       const half=Math.max(2,state3.beam/2), NS=Math.max(8,Math.round(state3.beam/2.5)), NRr=40, B=125;
+      const wxq = (state3.showPrecip && wx) ? wxAt() : null;
+      const rainDbKm = wxq ? rainAtten(fMHz, wxq.prec) : 0;
       const sq=d=>{ if(d<=0)return 1; if(fMHz<=0)return Math.max(0,1-d/range);
-        const fspl=20*Math.log10(d/1000)+20*Math.log10(fMHz)+32.44; return Math.max(0,Math.min(1,(B-fspl)/45)); };
+        const fspl=20*Math.log10(d/1000)+20*Math.log10(fMHz)+32.44 + rainDbKm*(d/1000);
+        return Math.max(0,Math.min(1,(B-fspl)/45)); };
       const cpos=[], ccol=[], cidx=[];
       for(let is=0; is<=NS; is++){
         const aDeg=az-half+2*half*is/NS, ar=aDeg*Math.PI/180, dx=Math.sin(ar), dz=-Math.cos(ar);
@@ -2777,6 +2792,224 @@ Object.defineProperty(exports, '__esModule', { value: true });
     $('#c3legend').textContent=(blocked?('Видимість: '+fmtLen(Math.round(reach))):'Пряма видимість на всю дальність')+(vScale>=1.5?(' · рельєф ×'+vScale.toFixed(0)):'');
     terrBusy=false;
   }
+  // ---- погода: вітер і опади (Open-Meteo, без ключа) ----
+  let wx = null;   // { time[], ws[], wd[], gust[], prec[], snow[] }
+  const DIR16 = ['Пн','ПнПнСх','ПнСх','СхПнСх','Сх','СхПдСх','ПдСх','ПдПдСх','Пд','ПдПдЗх','ПдЗх','ЗхПдЗх','Зх','ЗхПнЗх','ПнЗх','ПнПнЗх'];
+  const dirName = d => DIR16[Math.round(((d % 360) + 360) % 360 / 22.5) % 16];
+  async function loadWx(lat, lng) {
+    const u = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat.toFixed(4) + '&longitude=' + lng.toFixed(4) +
+      '&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m,precipitation,snowfall,weather_code,cape,cloud_cover&wind_speed_unit=ms&forecast_days=2&timezone=auto';
+    const r = await fetch(u);
+    if (!r.ok) throw new Error('wx');
+    const j = await r.json(), h = j.hourly;
+    const now = Date.now();
+    let idx = 0, best = Infinity;
+    h.time.forEach((t, i) => { const d = Math.abs(new Date(t).getTime() - now); if (d < best) { best = d; idx = i; } });
+    wx = { base: idx, time: h.time, ws: h.wind_speed_10m, wd: h.wind_direction_10m,
+           gust: h.wind_gusts_10m, prec: h.precipitation, snow: h.snowfall,
+           code: h.weather_code || [], cape: h.cape || [], cloud: h.cloud_cover || [] };
+  }
+  function wxAt() {
+    if (!wx) return null;
+    const i = Math.min(wx.time.length - 1, wx.base + state3.fhour);
+    const code = wx.code[i] || 0, cape = wx.cape[i] || 0;
+    return { i, ws: wx.ws[i] || 0, wd: wx.wd[i] || 0, gust: wx.gust[i] || 0,
+             prec: wx.prec[i] || 0, snow: wx.snow[i] || 0, time: wx.time[i],
+             code, cape, cloud: wx.cloud[i] || 0,
+             storm: [95, 96, 99].includes(code) || cape >= 1000 };
+  }
+  let wxSrc = '';
+  function wxLabel() {
+    const el = document.getElementById('c3wx'); if (!el) return;
+    const w = wxAt();
+    if (!w) { el.textContent = 'Погода: —'; return; }
+    const when = state3.fhour === 0 ? 'зараз' : hm(new Date(w.time).getTime());
+    const p = w.snow > 0 ? ('сніг ' + w.snow.toFixed(1) + ' см/год') : w.prec > 0 ? ('дощ ' + w.prec.toFixed(1) + ' мм/год') : 'без опадів';
+    const st = w.storm ? ' · ⚡ гроза (CAPE ' + Math.round(w.cape) + ')' : '';
+    el.textContent = 'Вітер ' + w.ws.toFixed(1) + ' м/с (пориви ' + w.gust.toFixed(0) + ') ' + Math.round(w.wd) + '° ' + dirName(w.wd) + ' · ' + p + st + ' · ' + when + (wxSrc ? ' · ' + wxSrc : '');
+  }
+  function windVec() {   // напрям, КУДИ дме (метео-напрям = звідки)
+    const w = wxAt(); if (!w) return new THREE.Vector3(1, 0, 0);
+    const a = ((w.wd + 180) % 360) * Math.PI / 180;
+    return new THREE.Vector3(Math.sin(a), 0, -Math.cos(a));
+  }
+  function clearWx3() {
+    if (!t3) return;
+    if (t3.flash) t3.flash.intensity = 0;
+    for (const k of ['wind', 'precip', 'storm']) {
+      if (t3[k]) { t3.scene.remove(t3[k]); t3[k].traverse(o => { o.geometry && o.geometry.dispose(); o.material && o.material.dispose(); }); t3[k] = null; }
+    }
+  }
+  function buildWind3() {
+    if (!t3 || !wx) return;
+    if (t3.wind) { t3.scene.remove(t3.wind); t3.wind = null; }
+    if (!state3.showWind) return;
+    const w = wxAt(), g = new THREE.Group(), dir = windVec();
+    const y = t3.mastH + 1.2, len = Math.min(6, 1.4 + w.ws * 0.35);
+    const from = new THREE.Vector3(0, y, 0).sub(dir.clone().multiplyScalar(len / 2));
+    const to = from.clone().add(dir.clone().multiplyScalar(len));
+    g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([from, to]), new THREE.LineBasicMaterial({ color: 0x5ad1e0 })));
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.6, 12), new THREE.MeshBasicMaterial({ color: 0x5ad1e0 }));
+    head.position.copy(to); head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+    g.add(head);
+    // частинки, що зносить вітром
+    const N = 140, pos = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) { pos[i*3] = (Math.random()-.5)*L3*2; pos[i*3+1] = Math.random()*6 + 0.2; pos[i*3+2] = (Math.random()-.5)*L3*2; }
+    const pg = new THREE.BufferGeometry(); pg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const pts = new THREE.Points(pg, new THREE.PointsMaterial({ color: 0x8fd6e0, size: 0.12, transparent: true, opacity: 0.55 }));
+    g.add(pts); g.userData.stream = pts;
+    t3.scene.add(g); t3.wind = g;
+  }
+  function buildPrecip3() {
+    if (!t3 || !wx) return;
+    if (t3.precip) { t3.scene.remove(t3.precip); t3.precip = null; }
+    const w = wxAt();
+    if (!state3.showPrecip || !w || (w.prec <= 0 && w.snow <= 0)) return;
+    const snow = w.snow > 0;
+    const rate = snow ? w.snow : w.prec;
+    const N = Math.min(2600, Math.round(320 + rate * 700));
+    const pos = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) { pos[i*3] = (Math.random()-.5)*L3*2.2; pos[i*3+1] = Math.random()*14; pos[i*3+2] = (Math.random()-.5)*L3*2.2; }
+    const pg = new THREE.BufferGeometry(); pg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const m = new THREE.PointsMaterial({ color: snow ? 0xffffff : 0x9ec7e8, size: snow ? 0.16 : 0.09, transparent: true, opacity: snow ? 0.9 : 0.6 });
+    const p = new THREE.Points(pg, m);
+    p.userData = { snow, fall: snow ? 1.4 : 7.5 };
+    t3.scene.add(p); t3.precip = p;
+  }
+  function stepWx3(dt) {
+    if (!t3 || !wx) return;
+    const w = wxAt(); if (!w) return;
+    const dir = windVec(), drift = dir.clone().multiplyScalar(w.ws * dt * 0.12);
+    if (t3.wind && t3.wind.userData.stream) {
+      const a = t3.wind.userData.stream.geometry.attributes.position, lim = L3 * 1.1;
+      for (let i = 0; i < a.count; i++) {
+        let x = a.getX(i) + drift.x, z = a.getZ(i) + drift.z;
+        if (Math.abs(x) > lim || Math.abs(z) > lim) { x = -Math.sign(dir.x || 1) * lim * Math.random(); z = -Math.sign(dir.z || 1) * lim * Math.random(); }
+        a.setX(i, x); a.setZ(i, z);
+      }
+      a.needsUpdate = true;
+    }
+    if (t3.precip) {
+      const a = t3.precip.geometry.attributes.position, fall = t3.precip.userData.fall * dt;
+      for (let i = 0; i < a.count; i++) {
+        let y = a.getY(i) - fall, x = a.getX(i) + drift.x * 0.6, z = a.getZ(i) + drift.z * 0.6;
+        if (y < 0) { y = 12 + Math.random() * 3; x = (Math.random()-.5)*L3*2.2; z = (Math.random()-.5)*L3*2.2; }
+        a.setX(i, x); a.setY(i, y); a.setZ(i, z);
+      }
+      a.needsUpdate = true;
+    }
+  }
+  // згасання в дощі (ITU-R P.838, спрощено) — дБ/км
+  function rainAtten(fMHz, mmH) {
+    if (!(fMHz > 2000) || !(mmH > 0)) return 0;
+    const f = fMHz / 1000;
+    const k = 0.0001 * Math.pow(f, 2.42), a = 1.1 - 0.02 * f;
+    return k * Math.pow(mmH, Math.max(0.6, a));
+  }
+  let wxLL = null;
+  function gpsOnce() {
+    return new Promise(res => {
+      if (!navigator.geolocation) return res(null);
+      navigator.geolocation.getCurrentPosition(
+        p => res({ lat: p.coords.latitude, lng: p.coords.longitude }),
+        () => res(null), { enableHighAccuracy: false, timeout: 6000, maximumAge: 300000 });
+    });
+  }
+  async function refreshWx3() {
+    if (!state3.showWind && !state3.showPrecip && !state3.showStorm) { clearWx3(); wxLabel(); return; }
+    let mk = lmarker ? lmarker.getLatLng() : null;
+    if (mk) wxSrc = (pickSource === 'gps' ? 'за GPS' : 'за точкою на мапі');
+    else {
+      const g = await gpsOnce();                    // немає точки — беремо GPS
+      if (g) { mk = g; wxSrc = 'за GPS'; }
+      else if (lmap) { mk = lmap.getCenter(); wxSrc = 'за центром мапи'; }
+    }
+    if (!mk) { status('Немає координат: увімкни GPS або постав точку на мапі', 'err'); return; }
+    const moved = !wxLL || Math.hypot(wxLL.lat - mk.lat, wxLL.lng - mk.lng) > 0.02;   // ~2 км
+    if (!wx || moved) {
+      document.getElementById('c3wx').textContent = 'Погода: завантаження…';
+      try { await loadWx(mk.lat, mk.lng); wxLL = { lat: mk.lat, lng: mk.lng }; }
+      catch (e) { document.getElementById('c3wx').textContent = 'Погода недоступна (потрібен інтернет)'; return; }
+    }
+    wxLabel(); stormText(); buildWind3(); buildPrecip3(); buildStorm3();
+    if (state3.terrain && state3.showQual) buildTerrain3();   // дощ впливає на якість сигналу
+  }
+  function isStormAt(i) {
+    if (!wx) return false;
+    const c = wx.code[i] || 0, cp = wx.cape[i] || 0;
+    return [95, 96, 99].includes(c) || cp >= 1000;
+  }
+  function stormETA() {   // найближча грозова година від поточної
+    if (!wx) return null;
+    for (let i = wx.base; i < wx.time.length; i++) {
+      if (isStormAt(i)) return { hours: i - wx.base, time: wx.time[i], cape: wx.cape[i] || 0 };
+    }
+    return null;
+  }
+  function stormText() {
+    const warn = document.getElementById('c3storm'); if (!warn) return;
+    if (!wx) { warn.hidden = true; return; }
+    const now = wxAt();
+    if (now && now.storm) { warn.hidden = false; warn.textContent = '⚡ ГРОЗА — польоти небезпечні'; return; }
+    const eta = stormETA();
+    if (!eta) { warn.hidden = true; return; }
+    warn.hidden = false;
+    const h = eta.hours;
+    warn.textContent = h === 0 ? '⚡ ГРОЗА — польоти небезпечні'
+      : '⚡ Гроза приблизно через ' + h + ' год (о ' + hm(new Date(eta.time).getTime()) + ')';
+  }
+  function buildStorm3() {
+    if (!t3 || !wx) return;
+    if (t3.storm) { t3.scene.remove(t3.storm); t3.storm.traverse(o => { o.geometry && o.geometry.dispose(); o.material && o.material.dispose(); }); t3.storm = null; }
+    t3.bolt = null;
+    const w = wxAt();
+    const on = state3.showStorm && w && w.storm;
+    stormText();
+    if (!on) { if (t3.flash) t3.flash.intensity = 0; return; }
+    const g = new THREE.Group();
+    // грозова хмара
+    const CY = 15;
+    for (let i = 0; i < 14; i++) {
+      const r = 2.2 + Math.random() * 2.6;
+      const b = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 10),
+        new THREE.MeshLambertMaterial({ color: 0x2a2f36, transparent: true, opacity: 0.92 }));
+      b.position.set((Math.random() - .5) * L3 * 1.7, CY + (Math.random() - .5) * 1.8, (Math.random() - .5) * L3 * 1.7);
+      b.scale.y = 0.6; g.add(b);
+    }
+    // спалах (світло) + канал блискавки
+    if (!t3.flash) { t3.flash = new THREE.PointLight(0xcfe4ff, 0, 120); t3.scene.add(t3.flash); }
+    const boltMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95 });
+    const bolt = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), boltMat);
+    bolt.visible = false; g.add(bolt);
+    t3.storm = g; t3.bolt = bolt; t3.cloudY = CY;
+    t3.scene.add(g);
+    t3.nextBolt = performance.now() + 400 + Math.random() * 1800;
+  }
+  function boltPath(x, z, y0) {   // зигзаг від хмари до землі
+    const pts = [], N = 12;
+    for (let i = 0; i <= N; i++) {
+      const k = i / N, jitter = (1 - k) * 1.4;
+      pts.push(new THREE.Vector3(x + (Math.random() - .5) * jitter, y0 * (1 - k), z + (Math.random() - .5) * jitter));
+    }
+    return pts;
+  }
+  function stepStorm3(dt) {
+    if (!t3 || !t3.storm || !t3.bolt) return;
+    const now = performance.now();
+    if (t3.flash && t3.flash.intensity > 0) {
+      t3.flash.intensity = Math.max(0, t3.flash.intensity - dt * 14);
+      if (t3.flash.intensity < 0.05) { t3.bolt.visible = false; t3.flash.intensity = 0; }
+    }
+    if (now >= t3.nextBolt) {
+      const w = wxAt(), rate = w ? Math.min(1, (w.cape || 0) / 2500 + (w.prec || 0) / 12) : 0.3;
+      const x = (Math.random() - .5) * L3 * 1.5, z = (Math.random() - .5) * L3 * 1.5;
+      t3.bolt.geometry.dispose();
+      t3.bolt.geometry = new THREE.BufferGeometry().setFromPoints(boltPath(x, z, t3.cloudY));
+      t3.bolt.visible = true;
+      if (t3.flash) { t3.flash.position.set(x, t3.cloudY * 0.6, z); t3.flash.intensity = 5 + Math.random() * 4; }
+      t3.nextBolt = now + 500 + Math.random() * (5200 - rate * 4200);   // частіше при сильній грозі
+    }
+  }
   function close3D(){ $('#cone3dwrap').hidden=true; if(t3&&t3.raf){ cancelAnimationFrame(t3.raf); t3.raf=null; } }
   async function open3D(){
     $('#maptune').hidden = true;
@@ -2793,6 +3026,10 @@ Object.defineProperty(exports, '__esModule', { value: true });
     $('#c3range').value=Math.min(15000,state3.range); $('#c3rangenum').value=state3.range;
     $('#c3freqnum').value=$('#antfreq').value||''; $('#cbQual').checked=state3.showQual;
     $('#c3terr').classList.remove('on'); $('#c3legend').textContent=DEF_LEGEND3;
+    $('#cbWind').checked=state3.showWind; $('#cbPrecip').checked=state3.showPrecip; $('#cbStorm').checked=state3.showStorm;
+    $('#c3fh').value=state3.fhour; $('#c3fhv').textContent = state3.fhour===0?'зараз':'+'+state3.fhour+' год';
+    wx=null; wxLL=null; clearWx3(); wxLabel(); stormText();
+    if(state3.showWind || state3.showPrecip || state3.showStorm) refreshWx3();
     $('#c3setpanel').hidden=true; setBack3();
     clearTerrainMeshes(); applyMastSymbolic(); rebuildCone3(); applyVis3(); resize3();
     if(!t3.raf) animate3();
@@ -2824,6 +3061,15 @@ Object.defineProperty(exports, '__esModule', { value: true });
   $('#c3range').addEventListener('input',()=>setRange(+$('#c3range').value));
   $('#c3rangenum').addEventListener('input',()=>setRange(+$('#c3rangenum').value));
   $('#c3freqnum').addEventListener('input',()=>{ $('#antfreq').value=$('#c3freqnum').value; rebuildCone3(); });
+  $('#cbWind').addEventListener('change', async ()=>{ state3.showWind=$('#cbWind').checked; await refreshWx3(); });
+  $('#cbPrecip').addEventListener('change', async ()=>{ state3.showPrecip=$('#cbPrecip').checked; await refreshWx3(); });
+  $('#cbStorm').addEventListener('change', async ()=>{ state3.showStorm=$('#cbStorm').checked; await refreshWx3(); });
+  $('#c3fh').addEventListener('input', ()=>{
+    state3.fhour=+$('#c3fh').value;
+    $('#c3fhv').textContent = state3.fhour===0 ? 'зараз' : '+'+state3.fhour+' год';
+    if(wx){ wxLabel(); stormText(); buildWind3(); buildPrecip3(); buildStorm3(); }
+  });
+  $('#c3fh').addEventListener('change', ()=>{ if(wx && state3.terrain && state3.showQual) buildTerrain3(); });
   $('#c3reset').addEventListener('click',()=>{ state3.yaw=0.7; state3.pitch=0.9; state3.dist=18; });
   $('#c3terr').addEventListener('click', async ()=>{
     state3.terrain=!state3.terrain; $('#c3terr').classList.toggle('on', state3.terrain);
