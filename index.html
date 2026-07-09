@@ -881,6 +881,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
   .eline { display:flex; align-items:center; gap:8px; }
   .eline input { flex:1; min-width:0; }
   .eline input[type=time] { flex:0 0 auto; }
+  .eline .qty { flex:0 0 74px; }
   .edel { flex:0 0 auto; background:transparent; border:none; color:var(--err); font:inherit; font-size:15px; cursor:pointer; padding:2px 6px; }
   .eadd { display:block; width:100%; margin-top:10px; background:transparent; border:1px dashed var(--line);
           color:var(--dim); font:inherit; font-size:12px; padding:9px; cursor:pointer; }
@@ -1148,6 +1149,18 @@ Object.defineProperty(exports, '__esModule', { value: true });
         <option value="корегування артилерії"></option>
         <option value="виявлено ціль противника"></option>
       </datalist>
+    </div>
+
+    <div id="daybox" hidden>
+      <div class="ehead">Зведення зміни</div>
+      <div class="erow"><span class="elbl">Втрати БпЛА</span><input type="number" id="dlost" min="0" value="0"></div>
+      <div class="erow"><span class="elbl">Пошкодження</span><input type="number" id="ddmg" min="0" value="0"></div>
+      <div class="ehead">Витрачено пропелерів</div>
+      <div id="proplist"></div>
+      <button type="button" id="propadd" class="eadd">+ Тип пропелера</button>
+      <div class="ehead">Дронів на позиції</div>
+      <div id="dronelist"></div>
+      <button type="button" id="droneadd" class="eadd">+ Тип дрона</button>
     </div>
 
     <div id="recwrap" hidden>
@@ -1422,6 +1435,14 @@ Object.defineProperty(exports, '__esModule', { value: true });
     store.set('kap_events', JSON.stringify(events)); idbSet('kap_events', events);
   }
 
+  // ---- зведення денної/нічної зміни ----
+  function loadDayCfg() {
+    try { const v = JSON.parse(store.get('kap_daycfg') || 'null'); if (v && typeof v === 'object') return Object.assign({ lost: 0, dmg: 0, props: [], drones: [] }, v); } catch (e) {}
+    return { lost: 0, dmg: 0, props: [], drones: [] };
+  }
+  let dayCfg = loadDayCfg();
+  function saveDayCfg() { store.set('kap_daycfg', JSON.stringify(dayCfg)); idbSet('kap_daycfg', dayCfg); }
+
   // ---- налаштування зміни ----
   let shiftStart = store.get('kap_shiftstart') || '16:00';
   let shiftCode = store.get('kap_shiftcode') || '';
@@ -1475,11 +1496,10 @@ Object.defineProperty(exports, '__esModule', { value: true });
     $('#flight').textContent = lines.length ? lines.join('\n') : 'таймер зупинено';
   }
 
-  const DEFAULT_COMMENT = 'Розвідка';
   function takeoff() {
     flying = true; startTs = Date.now(); takeoffStr = clockNow(); landingStr = ''; lastFlightMs = 0;
-    $('#comments').value = DEFAULT_COMMENT;            // кожен виліт починається з «Розвідка»
-    activeRec = { t: Date.now(), c: DEFAULT_COMMENT, x: {} };   // создаём запись вылета
+    $('#comments').value = '';                  // новий виліт — чистий коментар
+    activeRec = { t: Date.now(), c: '', x: {} };        // создаём запись вылета
     flights.push(activeRec); saveFlights(); renderStats();
     $('#clock').classList.add('live');
     $('#takeoff').textContent = 'Сів';
@@ -1517,17 +1537,31 @@ Object.defineProperty(exports, '__esModule', { value: true });
   let templates = loadTemplates();
   function saveTemplates() { store.set('kap_templates', JSON.stringify(templates)); idbSet('kap_templates', templates); }
 
+  const TIME_RE = /^\d{1,2}:\d{2}\s+/;                       // рядок уже з часом
   function insertTemplate(text) {
     const ta = $('#comments');
     const cur = ta.value.replace(/\s+$/, '');
-    const has = cur.split('\n').some(l => l.trim().toLowerCase() === text.trim().toLowerCase());
+    const body = text.trim();
+    const has = cur.split('\n').some(l => l.trim().replace(TIME_RE, '').toLowerCase() === body.toLowerCase());
     if (has) { ta.focus(); return; }            // не дублювати той самий шаблон
-    ta.value = cur ? (cur + '\n' + text) : text;
+    const stamped = hm(Date.now()) + ' ' + body;   // час додається до кожного коментаря
+    ta.value = cur ? (cur + '\n' + stamped) : stamped;
     ta.dispatchEvent(new Event('input'));   // привязка к вылету + сохранение
     ta.focus();
   }
 
   let tplEdit = false;
+  // вручну набрані рядки теж отримують час (при виході з поля)
+  $('#comments').addEventListener('blur', () => {
+    const ta = $('#comments');
+    const out = ta.value.split('\n').map(l => {
+      const s = l.trim();
+      if (!s || TIME_RE.test(s)) return s;
+      return hm(Date.now()) + ' ' + s;
+    });
+    const v = out.filter((l, i) => l || i < out.length - 1).join('\n');
+    if (v !== ta.value) { ta.value = v; ta.dispatchEvent(new Event('input')); }
+  });
   function renderTemplates() {
     const box = $('#tpls'); box.innerHTML = '';
     box.classList.toggle('editing', tplEdit);
@@ -1765,7 +1799,6 @@ Object.defineProperty(exports, '__esModule', { value: true });
       const evs = events.filter(ev => ev.t >= s && ev.t < e).sort((a, b) => a.t - b.t);
       const lines = [];
       lines.push(fmtD(s) + ' - ' + fmtD(e) + '.');
-      if (leader) lines.push('Старший групи: ' + leader);
       if (name) lines.push('СП ' + name + ':');
       lines.push('Перелік подій та виявлених цілей' + (shiftCode ? ' ' + shiftCode : '') + ' в районі спостереження');
       const scout = (a, b) => hm(a) + ' - ' + hm(b) + ' Ведення розвідки';
@@ -1789,19 +1822,28 @@ Object.defineProperty(exports, '__esModule', { value: true });
       return lines.join('\n');
     }
 
-    // ---- День / Ніч ----
+    // ---- День / Ніч (зведення) ----
     if (reportMode === 'day' || reportMode === 'night') {
       const s = dayBounds(), H = 3600e3;
       const win = reportMode === 'day' ? [s, s + 12 * H] : [s + 12 * H, s + 24 * H];
       const within = flights.filter(f => f.t >= win[0] && f.t < win[1]).sort((a, b) => a.t - b.t);
-      const title = reportMode === 'day' ? 'Зміна день (06:00–18:00)' : 'Зміна ніч (18:00–06:00)';
-      const lines = [name ? title + ': ' + name : title];
-      if (leader) lines.push('Старший групи: ' + leader);
-      lines.push('Вильотів: ' + within.length);
-      for (const f of within) lines.push(sortieLine(f));
-      const tot = totalsBlock(within);
+      const allLines = within.flatMap(f => cLines(f).map(l => l.replace(TIME_RE, '')));
+      const targets = allLines.filter(l => /виявл/i.test(l)).length;
+      const corrections = allLines.filter(l => /кориг|корег/i.test(l)).length;
+      const lines = [];
+      lines.push(hm(win[0]) + ' ' + fmtD(win[0]) + ' - ' + hm(win[1]) + ' ' + fmtD(win[1]));
+      lines.push('Екіпаж СП "' + name + '":');
+      lines.push('1. Кількість розвідувальних вильотів - ' + within.length + '.');
+      lines.push('2. Кількість виявлених цілей противника - ' + targets + '.');
+      lines.push('3. Кількість проведених коригувань засобів ураження - ' + corrections + '.');
+      lines.push('4. Втрати БпЛА - ' + (dayCfg.lost || 0));
+      lines.push('5. Пошкодження БпЛА - ' + (dayCfg.dmg || 0));
+      const props = (dayCfg.props || []).filter(p => p.name);
+      lines.push('6. Витрачено пропелерів - ' + (props.length ? props.map(p => '"' + p.name + '", ' + (p.qty || 0) + ' шт').join(' ') : '0 шт'));
+      lines.push('7. Дронів на позиції,');
+      (dayCfg.drones || []).filter(d => d.name).forEach(d => lines.push('    ' + d.name + ' - ' + (d.qty || 0) + ' шт'));
+      const tot = fieldTotals(within);
       if (tot.length) { lines.push(''); tot.forEach(l => lines.push(l)); }
-      if (c && !activeRec) lines.push(c);
       return lines.join('\n');
     }
 
@@ -1809,7 +1851,6 @@ Object.defineProperty(exports, '__esModule', { value: true });
       // тиждень: дні зі своїми вильотами (як добові зведення)
       const within = withinDays(7);
       const lines = [name ? 'Тиждень: ' + name : 'Тиждень'];
-      if (leader) lines.push('Старший групи: ' + leader);
       lines.push('Усього вилетів: ' + within.length);
       const days = new Map();
       for (const f of within) {
@@ -1836,7 +1877,6 @@ Object.defineProperty(exports, '__esModule', { value: true });
 
     const lines = [];
     if (name) lines.push(name);
-    if (leader) lines.push('Старший групи: ' + leader);
     if (takeoffStr)       lines.push('*Взліт*: ' + takeoffStr);
     if (c) {
       const cs = c.split('\n').map(s => s.trim()).filter(Boolean);
@@ -2088,7 +2128,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
   function addRec() {
     const [ws, we] = recWindow();
     const now = Date.now();
-    flights.push({ t: (now >= ws && now < we) ? now : ws, c: DEFAULT_COMMENT, x: {} });
+    flights.push({ t: (now >= ws && now < we) ? now : ws, c: '', x: {} });
     refreshReport(); renderRecs();
   }
   $('#evadd').addEventListener('click', addEvent);
@@ -2102,15 +2142,43 @@ Object.defineProperty(exports, '__esModule', { value: true });
   $('#shiftcode').addEventListener('input', () => { shiftCode = $('#shiftcode').value.trim(); saveShiftCfg(); updatePreview(true); });
   $('#sortiecount').addEventListener('input', () => { sortieCount = $('#sortiecount').value; saveShiftCfg(); updatePreview(true); });
 
+  // зведення денної/нічної зміни
+  function renderPairs(boxId, arr, ph) {
+    const box = $(boxId); box.innerHTML = '';
+    arr.forEach((it, i) => {
+      const row = document.createElement('div'); row.className = 'eline';
+      const n = document.createElement('input'); n.type = 'text'; n.value = it.name || ''; n.placeholder = ph;
+      const q = document.createElement('input'); q.type = 'number'; q.min = '0'; q.value = it.qty || 0; q.className = 'qty';
+      const del = document.createElement('button'); del.className = 'edel'; del.textContent = '✕';
+      n.addEventListener('input', () => { arr[i].name = n.value; saveDayCfg(); updatePreview(true); });
+      q.addEventListener('input', () => { arr[i].qty = Number(q.value) || 0; saveDayCfg(); updatePreview(true); });
+      del.addEventListener('click', () => { arr.splice(i, 1); saveDayCfg(); renderDayCfg(); updatePreview(true); });
+      row.append(n, q, del); box.appendChild(row);
+    });
+  }
+  function renderDayCfg() {
+    $('#dlost').value = dayCfg.lost || 0;
+    $('#ddmg').value = dayCfg.dmg || 0;
+    renderPairs('#proplist', dayCfg.props, 'Тип пропелера');
+    renderPairs('#dronelist', dayCfg.drones, 'Тип дрона');
+  }
+  $('#dlost').addEventListener('input', () => { dayCfg.lost = Number($('#dlost').value) || 0; saveDayCfg(); updatePreview(true); });
+  $('#ddmg').addEventListener('input', () => { dayCfg.dmg = Number($('#ddmg').value) || 0; saveDayCfg(); updatePreview(true); });
+  $('#propadd').addEventListener('click', () => { dayCfg.props.push({ name: '', qty: 0 }); saveDayCfg(); renderDayCfg(); });
+  $('#droneadd').addEventListener('click', () => { dayCfg.drones.push({ name: '', qty: 0 }); saveDayCfg(); renderDayCfg(); });
+
   function renderEditor() {
     const shift = reportMode === 'shift';
+    const dn = reportMode === 'day' || reportMode === 'night';
     $('#shiftbox').hidden = !shift;
+    $('#daybox').hidden = !dn;
     $('#recwrap').hidden = shift;
     if (shift) {
       const [s, e] = shiftBounds();
       $('#sortiecount').placeholder = 'авто: ' + flights.filter(f => f.t >= s && f.t < e).length;
       renderEvents();
     } else {
+      if (dn) renderDayCfg();
       renderFieldPanel(); renderRecs();
     }
   }
@@ -2999,6 +3067,8 @@ Object.defineProperty(exports, '__esModule', { value: true });
       if (typeof ss === 'string' && !store.get('kap_shiftstart')) shiftStart = ss;
       if (typeof sc === 'string' && !store.get('kap_shiftcode')) shiftCode = sc;
       if (typeof so === 'string' && !store.get('kap_sorties')) sortieCount = so;
+      const dc = await idbGet('kap_daycfg');
+      if (dc && typeof dc === 'object' && !store.get('kap_daycfg')) dayCfg = Object.assign(dayCfg, dc);
       const ic = await idbGet('kap_icon');
       if (ic && ic.i192 && ic.i512 && !store.get('kap_icon')) { customIcon = ic; applyIcon(); }
       const bm = await idbGet('kap_basemap');
