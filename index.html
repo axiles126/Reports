@@ -999,6 +999,8 @@ Object.defineProperty(exports, '__esModule', { value: true });
   #c3wx { font-size:12px; font-weight:600; color:#cbd3d8; }
   #c3storm { font-size:12px; font-weight:800; color:#ffd05a; }
   #c3storm[hidden] { display:none; }
+  #c3tgt { font-size:12px; font-weight:600; color:#9fe0a8; }
+  #c3tgt[hidden] { display:none; }
   .c3row { display:flex; gap:10px; margin-top:2px; }
   .c3row button { flex:1; background:transparent; border:1px solid #2c3238; color:#dfe3e6;
                   padding:11px; font:inherit; font-size:12px; cursor:pointer; border-radius:0; }
@@ -1229,6 +1231,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
       <div id="c3cov">Коридор висот: —</div>
       <div id="c3wx">Погода: —</div>
       <div id="c3storm" hidden>⚡ ГРОЗА — польоти небезпечні</div>
+      <div id="c3tgt" hidden>Ціль: —</div>
       <span id="c3legend">Північ — зелена вісь · промінь — біла лінія</span>
     </div>
     <div class="c3topR">
@@ -1244,6 +1247,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
       <label class="c3cb"><input type="checkbox" id="cbWind"> Вітер (прогноз)</label>
       <label class="c3cb"><input type="checkbox" id="cbPrecip"> Опади</label>
       <label class="c3cb"><input type="checkbox" id="cbStorm"> Гроза та блискавки</label>
+      <label class="c3cb"><input type="checkbox" id="cbTarget"> Ціль (2-га точка на мапі)</label>
       <label class="c3cb"><input type="checkbox" id="cbGrid" checked> Сітка</label>
       <label class="c3cb"><input type="checkbox" id="cbSky" checked> Зорі та сузір'я</label>
       <label class="c3cb"><input type="checkbox" id="cbMil"> Азимут у тисячних (0–6000)</label>
@@ -2527,7 +2531,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
   let three3Ready=null;
   function loadThree3(){ return three3Ready || (three3Ready = window.THREE?Promise.resolve():loadScript3('https://unpkg.com/three@0.128.0/build/three.min.js')); }
   const state3 = { az:0, beam:60, elev:0, range:120, antH:2, yaw:0.7, pitch:0.9, dist:18,
-                   showWind:false, showPrecip:false, showStorm:false, fhour:0,
+                   showWind:false, showPrecip:false, showStorm:false, useTarget:false, fhour:0,
                    showCone:true, showBand:true, showGrid:true, showSky:true, showQual:false, azMil:false };
   let t3 = null;
   const L3 = 9;
@@ -2692,6 +2696,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
   async function buildTerrain3(){
     if(!t3) return;
     if(terrBusy) return; terrBusy=true;
+    if(state3.useTarget) applyTarget3();
     const mk = lmarker ? lmarker.getLatLng() : (lmap ? lmap.getCenter() : null);
     if(!mk){ status('Відкрий мапу і постав точку','err'); state3.terrain=false; $('#c3terr').classList.remove('on'); terrBusy=false; return; }
     const ll={lat:mk.lat,lng:mk.lng}, range=state3.range, az=state3.az;
@@ -2788,6 +2793,21 @@ Object.defineProperty(exports, '__esModule', { value: true });
       grp.add(new THREE.Mesh(cg, new THREE.MeshBasicMaterial({ vertexColors:true, side:THREE.DoubleSide, transparent:true, opacity:0.6, depthWrite:false })));
     }
     t3.terrain=grp; t3.scene.add(grp);
+    // маркер цілі (2-га точка) з висотою за рельєфом
+    if(state3.useTarget && targetLL){
+      const tg = elevSync(targetLL.lat, targetLL.lng);
+      const agl = parseFloat($('#tgth').value) || 0;
+      if(tg != null){
+        const ty = (tg - g0 + agl) * u * vScale;
+        const tp = new THREE.Vector3(L3*gx, ty, L3*gz);
+        const mk = new THREE.Mesh(new THREE.SphereGeometry(0.18, 14, 12),
+          new THREE.MeshBasicMaterial({ color: blocked ? 0xc0392b : 0x7fd17f }));
+        mk.position.copy(tp); grp.add(mk);
+        grp.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(L3*gx,0,L3*gz), tp]),
+          new THREE.LineBasicMaterial({ color: 0x9aa3a8, transparent:true, opacity:0.6 })));
+      }
+      targetReadout(g0, tg, blocked, reach);
+    }
     rebuildCone3();
     $('#c3legend').textContent=(blocked?('Видимість: '+fmtLen(Math.round(reach))):'Пряма видимість на всю дальність')+(vScale>=1.5?(' · рельєф ×'+vScale.toFixed(0)):'');
     terrBusy=false;
@@ -3010,6 +3030,31 @@ Object.defineProperty(exports, '__esModule', { value: true });
       t3.nextBolt = now + 500 + Math.random() * (5200 - rate * 4200);   // частіше при сильній грозі
     }
   }
+  // ---- друга точка (ціль): азимут, дальність, висота з рельєфу ----
+  function antLL() { return lmarker ? lmarker.getLatLng() : (lmap ? lmap.getCenter() : null); }
+  function applyTarget3() {
+    const el = document.getElementById('c3tgt');
+    if (!state3.useTarget) { if (el) el.hidden = true; return false; }
+    const a = antLL();
+    if (!a || !targetLL) { if (el) { el.hidden = false; el.textContent = 'Ціль: постав 2-гу точку на мапі (режим «Ціль»)'; } return false; }
+    state3.az = Math.round(((bearing(a.lat, a.lng, targetLL.lat, targetLL.lng) % 360) + 360) % 360);
+    state3.range = Math.max(20, Math.round(distance(a.lat, a.lng, targetLL.lat, targetLL.lng)));
+    $('#c3az').value = state3.az; setAzNumDisplay(); setBack3();
+    $('#c3range').value = Math.min(15000, state3.range); $('#c3rangenum').value = state3.range;
+    $('#c3rangev') && ($('#c3rangev').textContent = fmtLen(state3.range));
+    return true;
+  }
+  function targetReadout(g0, tgtGround, blocked, reach) {
+    const el = document.getElementById('c3tgt'); if (!el) return;
+    const agl = parseFloat($('#tgth').value) || 0;
+    const parts = ['Ціль: ' + fmtLen(state3.range) + ' · АЗ ' + state3.az + '°'];
+    if (tgtGround != null) {
+      const dh = Math.round(tgtGround - g0);
+      parts.push('Δh ' + (dh >= 0 ? '+' : '') + dh + ' м' + (agl ? ' (+' + agl + ' м над землею)' : ''));
+      parts.push(blocked ? ('перекрита — видимість ' + fmtLen(Math.round(reach))) : 'пряма видимість');
+    }
+    el.hidden = false; el.textContent = parts.join(' · ');
+  }
   function close3D(){ $('#cone3dwrap').hidden=true; if(t3&&t3.raf){ cancelAnimationFrame(t3.raf); t3.raf=null; } }
   async function open3D(){
     $('#maptune').hidden = true;
@@ -3027,6 +3072,8 @@ Object.defineProperty(exports, '__esModule', { value: true });
     $('#c3freqnum').value=$('#antfreq').value||''; $('#cbQual').checked=state3.showQual;
     $('#c3terr').classList.remove('on'); $('#c3legend').textContent=DEF_LEGEND3;
     $('#cbWind').checked=state3.showWind; $('#cbPrecip').checked=state3.showPrecip; $('#cbStorm').checked=state3.showStorm;
+    $('#cbTarget').checked=state3.useTarget; document.getElementById('c3tgt').hidden=!state3.useTarget;
+    if(state3.useTarget) applyTarget3();
     $('#c3fh').value=state3.fhour; $('#c3fhv').textContent = state3.fhour===0?'зараз':'+'+state3.fhour+' год';
     wx=null; wxLL=null; clearWx3(); wxLabel(); stormText();
     if(state3.showWind || state3.showPrecip || state3.showStorm) refreshWx3();
@@ -3064,6 +3111,14 @@ Object.defineProperty(exports, '__esModule', { value: true });
   $('#cbWind').addEventListener('change', async ()=>{ state3.showWind=$('#cbWind').checked; await refreshWx3(); });
   $('#cbPrecip').addEventListener('change', async ()=>{ state3.showPrecip=$('#cbPrecip').checked; await refreshWx3(); });
   $('#cbStorm').addEventListener('change', async ()=>{ state3.showStorm=$('#cbStorm').checked; await refreshWx3(); });
+  $('#cbTarget').addEventListener('change', async ()=>{
+    state3.useTarget=$('#cbTarget').checked;
+    if(state3.useTarget){
+      if(!applyTarget3()){ rebuildCone3(); return; }
+      if(!state3.terrain){ state3.terrain=true; $('#c3terr').classList.add('on'); }
+      await buildTerrain3();
+    } else { document.getElementById('c3tgt').hidden=true; rebuildCone3(); }
+  });
   $('#c3fh').addEventListener('input', ()=>{
     state3.fhour=+$('#c3fh').value;
     $('#c3fhv').textContent = state3.fhour===0 ? 'зараз' : '+'+state3.fhour+' год';
