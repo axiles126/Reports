@@ -6,10 +6,10 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Копібара">
+<meta name="apple-mobile-web-app-title" content="Reports">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="theme-color" content="#ffffff">
-<title>КОПІБАРА</title>
+<title>Reports</title>
 <link rel="manifest" href="manifest.webmanifest">
 <script>
 (function (global, factory) {
@@ -823,9 +823,21 @@ Object.defineProperty(exports, '__esModule', { value: true });
   #reset.confirm { color:var(--err); }
   #editbtn::before { --ic:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M12%2020h9%22%2F%3E%3Cpath%20d%3D%22M16.5%203.5a2.12%202.12%200%200%201%203%203L7%2019l-4%201%201-4Z%22%2F%3E%3C%2Fsvg%3E"); }
   #editbtn.on { color:var(--ok); }
-  #guide { position:fixed; top:max(6px, env(safe-area-inset-top)); left:max(8px, env(safe-area-inset-left));
+  #splash { position:fixed; inset:0; z-index:3000; background:var(--bg);
+            display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px;
+            opacity:1; transition:opacity .45s ease; }
+  #splash.out { opacity:0; pointer-events:none; }
+  #splash[hidden] { display:none; }
+  #splashimg { width:min(46vw, 200px); height:auto; animation:spin 1.1s cubic-bezier(.2,.7,.2,1) both; }
+  #splashname { font-size:13px; font-weight:700; letter-spacing:3px; text-transform:uppercase; color:var(--dim); }
+  @keyframes spin { from { opacity:0; transform:scale(.86); } to { opacity:1; transform:scale(1); } }
+  @media (prefers-reduced-motion: reduce) { #splashimg { animation:none; } }
+  #guide { position:fixed; top:max(6px, env(safe-area-inset-top));
+           right:calc(max(8px, env(safe-area-inset-right)) + 88px); left:auto;
            z-index:50; width:40px; height:40px; padding:0; background:transparent; border:none;
            color:var(--fg); display:flex; align-items:center; justify-content:center; cursor:pointer; }
+  body.installed #guide { right:max(8px, env(safe-area-inset-right)); }
+  #guide { transition:right .25s ease; }
   #guidebox { position:fixed; inset:0; z-index:2100; background:rgba(0,0,0,.45);
               display:flex; align-items:center; justify-content:center; padding:20px; }
   #guidebox[hidden] { display:none; }
@@ -944,7 +956,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
   #mapwrap { position:fixed; inset:0; z-index:1000; background:#fff; }
   #mapwrap[hidden] { display:none; }
   #mapview { position:absolute; inset:0; }
-  #mapview .leaflet-tile-pane { filter:grayscale(1) contrast(1.05) brightness(1.03); }
+  #mapview.gray .leaflet-tile-pane { filter:grayscale(1) contrast(1.05) brightness(1.03); }
   .conelbl { background:rgba(255,255,255,.92); border:none !important; box-shadow:0 1px 3px rgba(0,0,0,.3);
              color:#111; font-family:inherit; font-size:11px; font-weight:600; padding:3px 7px; white-space:nowrap; }
   .conelbl::before { display:none !important; }
@@ -1046,6 +1058,10 @@ Object.defineProperty(exports, '__esModule', { value: true });
 </style>
 </head>
 <body>
+<div id="splash">
+  <img id="splashimg" src="icon-512.png" alt="Reports">
+  <div id="splashname"></div>
+</div>
 <button id="install" title="Встановити застосунок" hidden><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M5 21h14"/></svg></button>
 <main>
   <button id="nametoggle" class="tpltoggle">Назва ▾</button>
@@ -1145,6 +1161,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
     <button id="mapfix" title="Зафіксувати точку">⚑</button>
     <button id="mapcenter" title="Центр на маркер">⊕</button>
     <button id="mapcopy" title="Копіювати MGRS">⧉</button>
+    <button id="maplayer" title="Супутник / схема">◧</button>
     <button id="mapcone" title="Налаштування / антена">⚙</button>
     <button id="mapuse" title="Вставити в звіт" disabled>✓</button>
   </div>
@@ -1437,10 +1454,11 @@ Object.defineProperty(exports, '__esModule', { value: true });
     $('#flight').textContent = lines.length ? lines.join('\n') : 'таймер зупинено';
   }
 
+  const DEFAULT_COMMENT = 'Розвідка';
   function takeoff() {
     flying = true; startTs = Date.now(); takeoffStr = clockNow(); landingStr = ''; lastFlightMs = 0;
-    $('#comments').value = '';                  // новый вылет — чистый комментарий
-    activeRec = { t: Date.now(), c: '', x: {} };        // создаём запись вылета
+    $('#comments').value = DEFAULT_COMMENT;            // кожен виліт починається з «Розвідка»
+    activeRec = { t: Date.now(), c: DEFAULT_COMMENT, x: {} };   // создаём запись вылета
     flights.push(activeRec); saveFlights(); renderStats();
     $('#clock').classList.add('live');
     $('#takeoff').textContent = 'Сів';
@@ -1480,8 +1498,10 @@ Object.defineProperty(exports, '__esModule', { value: true });
 
   function insertTemplate(text) {
     const ta = $('#comments');
-    const cur = ta.value.trim();
-    ta.value = cur ? (cur + ', ' + text) : text;
+    const cur = ta.value.replace(/\s+$/, '');
+    const has = cur.split('\n').some(l => l.trim().toLowerCase() === text.trim().toLowerCase());
+    if (has) { ta.focus(); return; }            // не дублювати той самий шаблон
+    ta.value = cur ? (cur + '\n' + text) : text;
     ta.dispatchEvent(new Event('input'));   // привязка к вылету + сохранение
     ta.focus();
   }
@@ -1594,6 +1614,25 @@ Object.defineProperty(exports, '__esModule', { value: true });
     if (customIcon) { store.set('kap_icon', JSON.stringify(customIcon)); idbSet('kap_icon', customIcon); }
     else { try { localStorage.removeItem('kap_icon'); } catch (e) {} idbSet('kap_icon', null); }
   }
+  // ---- заставка при запуску (~3 с) ----
+  (function () {
+    const sp = document.getElementById('splash');
+    if (!sp) return;
+    try { const v = JSON.parse(localStorage.getItem('kap_icon') || 'null'); if (v && v.i512) document.getElementById('splashimg').src = v.i512; } catch (e) {}
+    // назва зміни (позиції) під картинкою
+    let sname = '';
+    try { sname = (localStorage.getItem('kap_name') || '').trim(); } catch (e) {}
+    document.getElementById('splashname').textContent = sname || 'Reports';
+    let done = false;
+    const hide = () => {
+      if (done) return; done = true;
+      sp.classList.add('out');
+      setTimeout(() => { sp.hidden = true; }, 500);
+    };
+    const t = setTimeout(hide, 3000);
+    sp.addEventListener('click', () => { clearTimeout(t); hide(); });   // тап — пропустити
+  })();
+
   function imgFromURL(url) {   // спершу пряме завантаження, потім через fetch→blob
     return new Promise((res, rej) => {
       const img = new Image(); img.crossOrigin = 'anonymous';
@@ -1666,11 +1705,16 @@ Object.defineProperty(exports, '__esModule', { value: true });
     }
     return out.length ? ' · ' + out.join(' · ') : '';
   }
-  function sortieLine(f) {
+  function cLines(f) { return (f.c || '').split('\n').map(s => s.trim()).filter(Boolean); }
+  function sortieLine(f, indent) {
+    const pad = indent || '';
     const a = hm(f.t), b = f.lt ? hm(f.lt) : '…';
     const dur = f.lt ? ' (' + fmt(f.lt - f.t) + ')' : '';
-    const tx = (f.c || '').trim().replace(/\n+/g, ', ');
-    return a + '–' + b + dur + (tx ? ' — ' + tx : '') + fieldsSuffix(f);
+    const cs = cLines(f);
+    const head = pad + a + '–' + b + dur;
+    if (cs.length <= 1) return head + (cs.length ? ' — ' + cs[0] : '') + fieldsSuffix(f);
+    // кілька коментарів — кожен окремим рядком під вильотом
+    return [head + fieldsSuffix(f), ...cs.map(s => pad + '  · ' + s)].join('\n');
   }
   // підсумки за шаблонами коментарів
   function tplTotals(list) {
@@ -1780,7 +1824,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
         if (!first) lines.push('');
         first = false;
         lines.push(pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + ' (' + wd + '): ' + arr.length);
-        for (const f of arr) lines.push('  ' + sortieLine(f));
+        for (const f of arr) lines.push(sortieLine(f, '  '));
       }
       const tot = totalsBlock(within);
       if (tot.length) { lines.push(''); tot.forEach(l => lines.push(l)); }
@@ -1792,7 +1836,11 @@ Object.defineProperty(exports, '__esModule', { value: true });
     if (name) lines.push(name);
     if (leader) lines.push('Старший групи: ' + leader);
     if (takeoffStr)       lines.push('*Взліт*: ' + takeoffStr);
-    if (c)                lines.push('Коментарі: ' + c);
+    if (c) {
+      const cs = c.split('\n').map(s => s.trim()).filter(Boolean);
+      if (cs.length <= 1) lines.push('Коментарі: ' + (cs[0] || ''));
+      else { lines.push('Коментарі:'); cs.forEach(s => lines.push('· ' + s)); }
+    }
     if (landingStr)       lines.push('*Сів*: ' + landingStr);
     if (lastFlightMs > 0) lines.push('У польоті: ' + fmt(lastFlightMs));
     return lines.join('\n');
@@ -2032,7 +2080,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
   function addRec() {
     const [ws, we] = recWindow();
     const now = Date.now();
-    flights.push({ t: (now >= ws && now < we) ? now : ws, c: '', x: {} });
+    flights.push({ t: (now >= ws && now < we) ? now : ws, c: DEFAULT_COMMENT, x: {} });
     refreshReport(); renderRecs();
   }
   $('#evadd').addEventListener('click', addEvent);
@@ -2084,6 +2132,18 @@ Object.defineProperty(exports, '__esModule', { value: true });
   }
 
   let lmap = null, lmarker = null, pickedCoords = '';
+  let baseLayers = null, baseMap = store.get('kap_basemap') || 'sat';
+  function applyBaseStyle() { $('#mapview').classList.toggle('gray', baseMap === 'osm'); }
+  function switchBase() {
+    if (!lmap || !baseLayers) return;
+    lmap.removeLayer(baseLayers[baseMap]);
+    baseMap = baseMap === 'sat' ? 'osm' : 'sat';
+    baseLayers[baseMap].addTo(lmap);
+    if (lmap.getPane('tilePane')) baseLayers[baseMap].bringToBack();
+    store.set('kap_basemap', baseMap); idbSet('kap_basemap', baseMap);
+    applyBaseStyle();
+    status(baseMap === 'sat' ? 'Супутник' : 'Схема (ч/б)', 'dim');
+  }
   function mgrsPretty(s) {
     const m = s.match(/^(\d{1,2}[C-X])([A-Z]{2})(\d+)$/);
     if (!m) return s;
@@ -2112,7 +2172,12 @@ Object.defineProperty(exports, '__esModule', { value: true });
     if (!lmap) {
       lmap = L.map('mapview', { zoomControl: false });
       L.control.zoom({ position: 'bottomleft' }).addTo(lmap);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(lmap);
+      baseLayers = {
+        sat: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: '© Esri, Maxar, Earthstar Geographics' }),
+        osm: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' })
+      };
+      baseLayers[baseMap].addTo(lmap);
+      applyBaseStyle();
       fixedLayer = L.layerGroup().addTo(lmap); drawFixed();
       antLayer = L.layerGroup().addTo(lmap);
       lmap.on('click', e => {
@@ -2341,6 +2406,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
     startCompass();
     updateCone();
   });
+  $('#maplayer').addEventListener('click', switchBase);
   $('#mapcone').addEventListener('click', () => { $('#maptune').hidden = !$('#maptune').hidden; });
   $('#conetarget').addEventListener('click', () => {
     coneMode = (coneMode === 'target') ? 'compass' : 'target';
@@ -2856,9 +2922,11 @@ Object.defineProperty(exports, '__esModule', { value: true });
   const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
                 (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   // показуємо кнопку всюди, де застосунок ще не запущено як встановлений
+  document.body.classList.toggle('installed', isStandalone);
   if (!isStandalone) { $('#install').hidden = false; $('#icontoggle').hidden = false; }
+  else document.body.classList.add('installed');
 
-  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredPrompt = e; $('#install').hidden = false; $('#icontoggle').hidden = false; });
+  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredPrompt = e; $('#install').hidden = false; $('#icontoggle').hidden = false; document.body.classList.remove('installed'); });
 
   $('#install').addEventListener('click', async () => {
     if (deferredPrompt) {                       // Chrome/Edge/Android — рідний діалог
@@ -2875,7 +2943,7 @@ Object.defineProperty(exports, '__esModule', { value: true });
     $('#installhelp').hidden = false;
   });
   $('#hhok').addEventListener('click', () => { $('#installhelp').hidden = true; });
-  window.addEventListener('appinstalled', () => { $('#install').hidden = true; $('#icontoggle').hidden = true; $('#iconbox').hidden = true; $('#installhelp').hidden = true; status('✓ Встановлено', 'ok'); });
+  window.addEventListener('appinstalled', () => { $('#install').hidden = true; $('#icontoggle').hidden = true; $('#iconbox').hidden = true; $('#installhelp').hidden = true; document.body.classList.add('installed'); status('✓ Встановлено', 'ok'); });
 
   // ---- скидання зміни (подвійне натискання для підтвердження) ----
   let resetArmed = false, resetTimer = null;
@@ -2925,6 +2993,8 @@ Object.defineProperty(exports, '__esModule', { value: true });
       if (typeof so === 'string' && !store.get('kap_sorties')) sortieCount = so;
       const ic = await idbGet('kap_icon');
       if (ic && ic.i192 && ic.i512 && !store.get('kap_icon')) { customIcon = ic; applyIcon(); }
+      const bm = await idbGet('kap_basemap');
+      if ((bm === 'sat' || bm === 'osm') && !store.get('kap_basemap')) baseMap = bm;
       if (typeof rm === 'string' && store.get('kap_reportmode') == null) setMode(rm);
     } catch (e) {}
     nameToggleLabel(); saveFlights(); saveEvents(); renderStats();
