@@ -1764,28 +1764,28 @@ Object.defineProperty(exports, '__esModule', { value: true });
       const within = flights.filter(f => f.t >= s && f.t < e);
       const evs = events.filter(ev => ev.t >= s && ev.t < e).sort((a, b) => a.t - b.t);
       const lines = [];
-      lines.push(fmtD(s) + ' - ' + fmtD(e));
-      lines.push(shiftStart + ' -' + shiftStart);
+      lines.push(fmtD(s) + ' - ' + fmtD(e) + '.');
       if (leader) lines.push('Старший групи: ' + leader);
       if (name) lines.push('СП ' + name + ':');
       lines.push('Перелік подій та виявлених цілей' + (shiftCode ? ' ' + shiftCode : '') + ' в районі спостереження');
+      const scout = (a, b) => hm(a) + ' - ' + hm(b) + ' Ведення розвідки';
       if (!evs.length) {
-        lines.push(tLabel(s, s) + '-' + tLabel(e, s) + '-Ведення розвідки');
+        lines.push(scout(s, e));
       } else {
-        let cur = s;
+        const first = evs[0], last = evs[evs.length - 1];
+        if (first.t > s) lines.push(scout(s, first.t));          // від початку зміни до першої події
         for (const ev of evs) {
-          if (ev.t > cur) lines.push(tLabel(cur, s) + '-' + tLabel(ev.t, s) + '-Ведення розвідки');
-          lines.push(tLabel(ev.t, s) + '-' + ev.text + (ev.mgrs ? ' за координатами ' + ev.mgrs : ''));
-          cur = ev.t + 60000;   // наступна хвилина
+          const when = hm(ev.t) + (ev.t2 ? '-' + hm(ev.t2) : '');
+          const body = [name, ev.text].filter(Boolean).join(' ');
+          lines.push(when + (body ? ' ' + body : '') + (ev.mgrs ? ' за координатами ' + ev.mgrs : ''));
         }
-        if (cur < e) lines.push(tLabel(cur, s) + '-' + tLabel(e, s) + '-Ведення розвідки');
+        const endLast = (last.t2 || last.t) + 60000;             // від останньої події до кінця зміни
+        if (endLast < e) lines.push(scout(endLast, e));
       }
-      lines.push('');
       const cnt = (sortieCount !== '' && !isNaN(Number(sortieCount))) ? Number(sortieCount) : within.length;
-      lines.push('Під час добової зміни здійснено ' + cnt + ' вильотів');
+      lines.push('За час добової зміни здійснено ' + cnt + ' вильотів.');
       totalsBlock(within).forEach(l => lines.push(l));
-      lines.push('Без втрат чи поранень серед особового складу СП ' + name.toUpperCase() + ':');
-      lines.push('Інформацію про події та виявлені цілі було передано оперативному черговому.');
+      lines.push('Без втрат чи поранень серед особового складу СП ' + name + ':Інформацію про події та виявлені цілі було передано оперативному черговому.');
       return lines.join('\n');
     }
 
@@ -1969,9 +1969,10 @@ Object.defineProperty(exports, '__esModule', { value: true });
       const it = document.createElement('div'); it.className = 'eitem';
       const l1 = document.createElement('div'); l1.className = 'eline';
       const tI = document.createElement('input'); tI.type = 'time'; tI.value = hhmm(ev.t);
+      const t2I = document.createElement('input'); t2I.type = 'time'; t2I.value = ev.t2 ? hhmm(ev.t2) : ''; t2I.title = 'Кінець (необовʼязково)';
       const dI = document.createElement('input'); dI.type = 'text'; dI.value = ev.text || ''; dI.placeholder = 'Опис події'; dI.setAttribute('list', 'evhints');
       const del = document.createElement('button'); del.className = 'edel'; del.textContent = '✕'; del.title = 'Видалити';
-      l1.append(tI, dI, del);
+      l1.append(tI, t2I, dI, del);
       const l2 = document.createElement('div'); l2.className = 'eline';
       const cI = document.createElement('input'); cI.type = 'text'; cI.value = ev.mgrs || ''; cI.placeholder = 'Координати (MGRS)';
       l2.append(cI);
@@ -1981,6 +1982,11 @@ Object.defineProperty(exports, '__esModule', { value: true });
         let t = tsFromTime(s, tI.value);
         if (t < s) t += DAY;                    // час після опівночі — другі доби зміни
         events[idx].t = t; refreshReport(); renderEvents();
+      });
+      t2I.addEventListener('change', () => {
+        if (!t2I.value) { delete events[idx].t2; }
+        else { let t2 = tsFromTime(s, t2I.value); if (t2 < events[idx].t) t2 += DAY; events[idx].t2 = t2; }
+        refreshReport(); renderEvents();
       });
       dI.addEventListener('input', () => { events[idx].text = dI.value; refreshReport(); });
       cI.addEventListener('input', () => { events[idx].mgrs = cI.value.trim(); refreshReport(); });
